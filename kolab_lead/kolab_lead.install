@@ -1,0 +1,223 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function kolab_lead_schema() {
+  $schema = array();
+
+  $schema['lead'] = array(
+    'description' => 'The base table for leads.',
+    'fields' => array(
+      'lid' => array(
+        'description' => 'The primary identifier for the lead.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'status' => array(
+        'description' => 'Lead status 0 - red, 1 - amber, 2 - green, 3 - investor.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'size' => 'tiny'
+      ),
+      'source' => array(
+        'description' => 'The source of lead.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'title' => array(
+        'description' => 'Title of the lead (salutation).',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'first_name' => array(
+        'description' => 'First name of the lead.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'surname' => array(
+        'description' => 'Last name of the lead.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'investor' => array(
+        'description' => 'Investor status.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'mail' => array(
+        'description' => 'E-mail address of the lead.',
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => FALSE,
+        'default' => ''
+      ),
+      'phone' => array(
+        'description' => 'Home phone number of the lead.', 
+        'type' => 'varchar', 
+        'length' => 20, 
+        'not null' => FALSE, 
+        'default' => ''
+      ),
+      'phone_mobile' => array(
+        'description' => 'Mobile phone number of the lead.', 
+        'type' => 'varchar', 
+        'length' => 20,
+        'not null' => TRUE,
+        'default' => ''
+      ),
+      'address' => array(
+        'description' => 'Address line 1 of the lead.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'address2' => array(
+        'description' => 'Address line 2 of the lead.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'county' => array(
+        'description' => 'County of the lead.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'postcode' => array(
+        'description' => 'Postcode of the lead.',
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'message' => array(
+        'description' => 'Message of the lead.',
+        'type' => 'text',
+      ),
+      'published' => array(
+        'description' => 'Boolean indicating whether the lead is published (visible to non-administrators).',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+      ),
+      'uid' => array(
+        'description' => 'ID of Drupal user creator.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+      ),
+      'created' => array(
+        'description' => 'The Unix timestamp when the lead was created (submitted).',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'changed' => array(
+        'description' => 'The Unix timestamp when the lead was most recently saved.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'public_id' => array(
+        'description' => 'The public lead ID.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'uid_ref' => array(
+        'description' => 'Reference to the Drupal user account.', 
+        'type' => 'int', 
+        'not null' => FALSE,
+        'default' => 0
+      ),
+    ),
+    'primary key' => array('lid'),
+  );
+
+  $schema['lead_history'] = array(
+    'description' => 'A record of which {users} have read which {lead}s.',
+    'fields' => array(
+      'uid' => array(
+        'description' => 'The {users}.uid that read the {lead} lid.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'lid' => array(
+        'description' => 'The {lead}.lid that was read.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'timestamp' => array(
+        'description' => 'The Unix timestamp at which the read occurred.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('uid', 'lid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Add public ID to lead table.
+ */
+function kolab_lead_update_7100() {
+  $publicLeadID = array('description' => 'The public lead ID.', 'type' => 'varchar', 'length' => 255, 'not null' => FALSE, 'default' => '');
+  db_add_field('lead', 'public_id', $publicLeadID);
+}
+
+/**
+ * Add index.
+ */
+function kolab_lead_update_7200() {
+  $publicLeadID = array('public_id');
+  db_add_index('lead', 'public_id', $publicLeadID);
+}
+
+/**
+ * Add uid_ref to lead table + index.
+ */
+function kolab_lead_update_7300() {
+  $uid_ref = array('description' => 'Reference to the Drupal user account.', 'type' => 'int', 'not null' => FALSE, 'default' => 0);
+  db_add_field('lead', 'uid_ref', $uid_ref);
+  db_add_index('lead', 'lid_uid_ref', array('lid', 'uid_ref'));
+}
+
+/**
+ * Change investor field.
+ * Add source_manually and source_other fields to lead table.
+ */
+function kolab_lead_update_7400() {
+  $investor = array('description' => 'Investor status.', 'type' => 'varchar', 'length' => 255, 'not null' => FALSE, 'default' => '');
+  db_change_field('lead', 'investor', 'investor', $investor);
+
+  $num_updated = db_update('lead')->fields(array('investor' => ''))->condition('investor', 0)->execute();
+  $num_updated = db_update('lead')->fields(array('investor' => 'a'))->condition('investor', 1)->execute();
+
+  $source_manually = array('description' => 'Manually source type.', 'type' => 'varchar', 'length' => 255, 'not null' => FALSE, 'default' => '');
+  db_add_field('lead', 'source_manually', $source_manually);
+
+  $source_other = array('description' => 'Other manually source.', 'type' => 'varchar', 'length' => 255, 'not null' => FALSE, 'default' => '');
+  db_add_field('lead', 'source_other', $source_other);
+}

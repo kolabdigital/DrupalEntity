@@ -1,0 +1,9 @@
+name = Lead
+description = Support for leads as a custom Entity.
+core = 7.x
+version = "7.x-4.0"
+package = "Kolab Europe"
+
+dependencies[] = entity
+
+files[] = kolab_lead.controller.inc

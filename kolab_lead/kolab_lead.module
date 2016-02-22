@@ -1,0 +1,1113 @@
+<?php
+
+/**
+ * Lead is not published.
+ */
+define('LEAD_NOT_PUBLISHED', 0);
+
+/**
+ * Lead is published.
+ */
+define('LEAD_PUBLISHED', 1);
+
+/**
+ * Leads changed before this time are always marked as read.
+ *
+ * Leads changed after this time may be marked new, updated, or read, depending
+ * on their state for the current user. Defaults to 30 days ago.
+ */
+define('LEAD_NEW_LIMIT', REQUEST_TIME - 30 * 24 * 60 * 60);
+
+/**
+ * Implements hook_entity_info().
+ */
+function kolab_lead_entity_info() {
+  $lead_info['lead'] = array(
+    // A human readable label to identify our entity.
+    'label' => t('Lead'),
+    'entity class' => 'Lead',
+    // The controller for our Entity - extends the Drupal core controller.
+    'controller class' => 'LeadController',
+    // The table defined in hook_schema()
+    'base table' => 'lead',
+    // Returns the uri elements of an entity
+    'uri callback' => 'lead_uri',
+    // Fieldable that we can attach fields to it - the core functionality will
+    // do the heavy lifting here.
+    'fieldable' => TRUE,
+    'load hook' => 'kolab_lead_load',
+    // The unique key of our base table.
+    'entity keys' => array(
+      'id' => 'lid',
+    ),
+    // FALSE disables caching -  caching functionality is handled by Drupal core
+    'static cache' => TRUE,
+    // Attach bundles - i.e. alternative configurations of fields associated with a main entity.
+    //'bundles' => array(),
+    'bundles' => array(
+      'lead' => array(
+        'label' => 'Lead',
+        // Information below is used by the Field UI - they "attach" themselves here and lets us
+        // do the standard field management that all the core entities enjoy.
+        'admin' => array(
+          'path' => 'admin/structure/lead/manage',
+          'access arguments' => array('administer lead entities'),
+        ),
+      ),
+    ),
+    // 'admin ui' => array(
+    //   'path' => 'admin/content/lead',
+    //   'controller class' => 'LeadUIController',
+    // ),
+    // View modes allow entities to be displayed differently based on context. We simply have one option
+    // here but an alternative would be to have a Full and Teaser mode akin to node.
+    'view modes' => array(
+      'full' => array(
+        'label' => t('Full'),
+        'custom settings' =>  FALSE,
+      ),
+    ),
+    'label callback' => 'entity_class_label',
+    'uri callback' => 'entity_class_uri',
+    'module' => 'kolab_lead',
+    'access callback' => 'kolab_lead_access',
+  );
+  return $lead_info;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function kolab_lead_theme() {
+  return array(
+    'kolab_lead_status_agenda' => array(
+      'variables' => array(),
+    ),
+    'lead' => array(
+      'render element' => 'elements',
+      'template' => 'templates/lead',
+    ),
+    'kolab_lead_details' => array(
+      'details' => NULL,
+      'template' => 'templates/kolab_lead_details',
+    ),
+  );
+}
+
+function kolab_lead_preprocess(&$variables, $hook) {
+  if (isset($variables['elements']['#entity_type'])) { // or maybe check for $hook name
+    $function = __FUNCTION__ . '_' . $variables['elements']['#entity_type'];
+    if (function_exists($function)) {
+      $function($variables, $hook);
+    }
+  }
+}
+
+/**
+ * Preprocess lead
+ */
+function kolab_lead_preprocess_lead(&$variables, $hook) {
+  global $user;
+
+  $view_mode = (isset($variables['view_mode'])) ? $variables['view_mode'] : '';
+
+  if($view_mode == 'full') {
+    $lead = $variables['lead'];
+    // if(kolab_lead_access('edit', $lead)) {
+    //   //drupal_goto('lead/'. $lead->lid . '/edit');
+    // }
+  }
+}
+
+/**
+ * Theme output of lead status agenda
+ * @ingroup themeable
+ */
+function theme_kolab_lead_status_agenda($variables) {
+  $items = array();
+  $items[] = '<span class="red">Red</span> - New lead / Not proceedable / No time scale / Need to sell but house not on market / Not seeking financial advice / Casual interest';
+  $items[] = '<span class="amber">Amber</span> - Actively trying to get into proceedable position / Specific interest in this development';
+  $items[] = '<span class="green">Green</span> – Proceedable';
+  return theme('item_list', array('items' => $items, 'attributes' => array('id' => 'lead-status-list')));
+}
+
+/**
+ * Implements hook_menu().
+ */
+function kolab_lead_menu() {
+
+  $items = array();
+
+  $items['admin/config/kolab/lead'] = array(
+    'title' => t('Leads'),
+    'page callback' => 'kolab_lead_settings_page',
+    'access arguments' => array('administer lead entities'),
+    'file' => 'kolab_lead.admin.inc',
+  );
+
+  $items['admin/config/kolab/lead/settings'] = array(
+    'title' => t('Settings'),
+    'description' => t('Lead settings'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 1,
+  );
+
+  $items['leads'] = array(
+    'title' => 'Leads',
+    'description' => 'Displays all leads',
+    'page callback' => 'kolab_lead_list_page',
+    'access arguments' => array('view lead entities'),
+    'file' => 'kolab_lead.pages.inc',
+  );
+
+  $items['admin/structure/lead/manage'] = array(
+    'title' => 'Lead',
+    'description' => 'Manage Leads Structure',
+    'page callback' => 'kolab_lead_admin_page',
+    'access arguments' => array('administer lead entities'),
+    'file' => 'kolab_lead.admin.inc',
+  );
+
+  $items['admin/content/lead'] = array(
+    'title' => 'Leads',
+    'description' => 'Find and manage leads.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('kolab_lead_admin_content'),
+    'access arguments' => array('access lead overview'),
+    'file' => 'kolab_lead.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['lead/add'] = array(
+    'title' => 'Add lead',
+    'page callback' => 'kolab_lead_add',
+    'access callback' => 'entity_access',
+    'access arguments' => array('create', 'lead'),
+    'file' => 'kolab_lead.admin.inc',
+  );
+
+  $items['lead/autocomplete'] = array(
+    'title' => 'Lead autocomplete',
+    'page callback' => 'kolab_lead_autocomplete',
+    'access arguments' => array('view lead entities'),
+    'type' => MENU_CALLBACK,
+    'file' => 'kolab_lead.pages.inc',
+  );
+
+  $lead_uri = 'lead/%kolab_lead';
+  $lead_uri_argument_position = 1;
+
+  $items[$lead_uri] = array(
+    'title callback' => 'entity_label',
+    'title arguments' => array('lead', $lead_uri_argument_position),
+    'page callback' => 'kolab_lead_view',
+    'page arguments' => array($lead_uri_argument_position),
+    'access callback' => 'entity_access',
+    'access arguments' => array('view', 'lead', $lead_uri_argument_position),
+    'file' => 'kolab_lead.pages.inc',
+  );
+
+  $items[$lead_uri . '/view'] = array(
+    'title' => 'View',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+
+  $items[$lead_uri . '/delete'] = array(
+    'title' => 'Delete lead',
+    'title callback' => 'kolab_lead_label',
+    'title arguments' => array($lead_uri_argument_position),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('kolab_lead_delete_form', $lead_uri_argument_position),
+    'access callback' => 'entity_access',
+    'access arguments' => array('delete', 'lead', $lead_uri_argument_position),
+    'file' => 'kolab_lead.admin.inc',
+  );
+
+  $items[$lead_uri . '/edit'] = array(
+    'title' => 'Edit',
+    'page callback' => 'kolab_lead_edit',
+    'page arguments' => array($lead_uri_argument_position),
+    'access callback' => 'entity_access',
+    'access arguments' => array('edit', 'lead', $lead_uri_argument_position),
+    'file' => 'kolab_lead.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+  );
+
+  return $items;
+}
+
+/**
+ * Source types.
+ */
+function kolab_lead_get_sources(){
+  return array(
+    '' => '-- None --',
+    'manually'  => 'Manually',
+    'website' => 'HAB website',
+    'zoopla' => 'Zoopla',
+    'import' => 'Import',
+    //'other' => 'Other',
+  );
+}
+
+/**
+ * Investor statuses.
+ */
+function kolab_lead_get_investor_statuses(){
+  return array(
+    '' => '-- None --',
+    'a' => 'A',
+    'b' => 'B',
+    'land' => 'Land',
+  );
+}
+
+/**
+ * Lead statuses.
+ */
+function kolab_lead_get_statuses(){
+  return array('Red', 'Amber', 'Green', 'Investor');
+}
+
+/**
+ * Lead statuses.
+ */
+function kolab_lead_get_status_full_name($value) {
+  switch($value) {
+    case 'ndp':
+      return 'NDP';
+    case 'sstc':
+      return 'SSTC';
+    case 'first':
+      return 'First time buyer';
+    case 'investor':
+      return 'Investor';
+    case 'house_to_sell':
+      return 'House to sell';
+    case 'px':
+      return 'PX';
+    default: 
+      return '';
+  }
+}
+
+/**
+ * Lead salutations.
+ */
+function kolab_lead_get_titles(){
+  return array(
+    '' => '-- None --',
+    'mr' => 'Mr', 
+    'mrs' => 'Mrs',
+    'ms' => 'Ms',
+    'miss' => 'Miss',
+  );
+}
+
+/**
+ * Implements hook_permission().
+ */
+function kolab_lead_permission() {
+  $permissions = array(
+    'administer lead entities' => array(
+      'title' => t('Administer leads'),
+      'description' => t('Allows users to administer leads.'),
+      'restrict access' => TRUE,
+    ),
+    'access lead overview' => array(
+      'title' => t('Access lead overview'),
+      'description' => t('Allows users to view list of leads.'),
+    ),
+    'create lead entities' => array(
+      'title' => t('Create leads'),
+      'description' => t('Allows users to create leads.'),
+      'restrict access' => TRUE,
+    ),
+    'view lead entities' => array(
+      'title' => t('View leads'),
+      'description' => t('Allows users to view any leads.'),
+      'restrict access' => TRUE,
+    ),
+    'view own lead entities' => array(
+      'title' => t('View own leads'),
+      'description' => t('Allows users to view own leads.'),
+      'restrict access' => TRUE,
+    ),
+    'edit any lead entities' => array(
+      'title' => t('Edit any leads'),
+      'description' => t('Allows users to edit any leads.'),
+      'restrict access' => TRUE,
+    ),
+    'edit own lead entities' => array(
+      'title' => t('Edit own leads'),
+      'description' => t('Allows users to edit own leads.'),
+      'restrict access' => TRUE,
+    ),
+    'delete any lead entities' => array(
+      'title' => t('Delete any leads'),
+      'description' => t('Allows users to delete any leads.'),
+      'restrict access' => TRUE,
+    ),
+    'delete own lead entities' => array(
+      'title' => t('Delete own leads'),
+      'description' => t('Allows users to delete own leads.'),
+      'restrict access' => TRUE,
+    ),
+  );
+
+  return $permissions;
+}
+
+/**
+ * Implements hook_entity_property_info_alter().
+ */
+function kolab_lead_entity_property_info_alter(&$info) {
+  $properties = &$info['lead']['properties'];
+  $properties['created'] = array(
+    'label' => t("Date created"),
+    'type' => 'date',
+    'description' => t("The date the node was posted."),
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer nodes',
+    'schema field' => 'created',
+  );
+  $properties['changed'] = array(
+    'label' => t("Date changed"),
+    'type' => 'date',
+    'schema field' => 'changed',
+    'description' => t("The date the node was most recently updated."),
+  );
+  $properties['uid'] = array(
+    'label' => t("Author"),
+    'type' => 'user',
+    'description' => t("The author of the task."),
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+    'required' => TRUE,
+    'schema field' => 'uid',
+  );
+  $properties['uid'] = array(
+    'label' => t("Author"),
+    'type' => 'user',
+    'description' => t("The author of the task."),
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+    'required' => TRUE,
+    'schema field' => 'uid',
+  );
+  $properties['first_name'] = array(
+    'label' => t("First name"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'first_name',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['surname'] = array(
+    'label' => t("Surname"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'surname',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['mail'] = array(
+    'label' => t("mail"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'mail',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['address'] = array(
+    'label' => t("Address"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'address',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['address2'] = array(
+    'label' => t("Address 2"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'address2',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['county'] = array(
+    'label' => t("County"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'county',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['investor'] = array(
+    'label' => t("Investor"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'investor',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['phone_mobile'] = array(
+    'label' => t("Phone mobile"),
+    'type' => 'text',
+    'required' => TRUE,
+    'schema field' => 'phone_mobile',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['phone'] = array(
+    'label' => t("Phone"),
+    'type' => 'text',
+    'schema field' => 'phone',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['postcode'] = array(
+    'label' => t("Postcode"),
+    'type' => 'text',
+    'schema field' => 'postcode',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['status'] = array(
+    'label' => t("Status"),
+    'type' => 'integer',
+    'schema field' => 'status',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['source'] = array(
+    'label' => t("Source"),
+    'type' => 'text',
+    'schema field' => 'source',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['title'] = array(
+    'label' => t("Title of the lead (salutation)."),
+    'type' => 'text',
+    'schema field' => 'title',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+  $properties['public_id'] = array(
+    'label' => t("Public id"),
+    'type' => 'text',
+    'schema field' => 'public_id',
+    'setter callback' => 'entity_property_verbatim_set',
+    'setter permission' => 'administer lead entities',
+  );
+}
+
+/**
+ * Access callback for lead.
+ */
+function kolab_lead_access($op, $lead, $account = NULL) {
+  global $user;
+
+  if (!isset($account)) {
+    $account = $user;
+  }
+  switch ($op) {
+    case 'create':
+      return user_access('administer lead entities', $account)
+          || user_access('create lead entities', $account);
+    case 'view':
+      return user_access('administer lead entities', $account)
+          || user_access('view lead entities', $account)
+          || (user_access('view own lead entities') && ($lead->uid == $account->uid));
+    case 'edit':
+      return user_access('administer lead entities')
+          || user_access('edit any lead entities')
+          || (user_access('edit own lead entities') && ($lead->uid == $account->uid));
+    case 'delete':
+      return !$lead->uid_ref && (user_access('administer lead entities')
+          || user_access('delete any lead entities')
+          || (user_access('delete own lead entities') && ($lead->uid == $account->uid)));
+  }
+}
+
+/**
+ * Load a lead.
+ */
+function kolab_lead_load($lid, $reset = FALSE) {
+  $leads = kolab_lead_load_multiple(array($lid), array(), $reset);
+  return reset($leads);
+}
+
+/**
+ * Load multiple leads based on certain conditions.
+ */
+function kolab_lead_load_multiple($lids = array(), $conditions = array(), $reset = FALSE) {
+  return entity_load('lead', $lids, $conditions, $reset);
+}
+
+/**
+ * Returns all defined leads.
+ *
+ * @return array
+ *   An array of entity objects indexed by their names.
+ */
+function kolab_lead_load_all() {
+  return entity_load_multiple_by_name('lead');
+}
+
+/**
+ * Save lead.
+ */
+function kolab_lead_save($lead) {
+  $lead->changed = REQUEST_TIME;
+  if (!empty($lead->lid)) {
+    entity_save('lead', $lead);
+    module_invoke_all('lead_update', $lead);
+  }
+  else {
+    entity_save('lead', $lead);
+    module_invoke_all('lead_insert', $lead);
+  }
+}
+
+/**
+ * Delete single lead.
+ */
+function kolab_lead_delete($lid) {
+  kolab_lead_delete_multiple(array($lid));
+}
+
+/**
+ * Delete multiple leads.
+ */
+function kolab_lead_delete_multiple($lids) {
+  if (!empty($lids)) {
+    $leads = kolab_lead_load_multiple($lids, array());
+    $transaction = db_transaction();
+    try {
+      foreach ($leads as $lid => $lead) {
+        module_invoke_all('lead_delete', $lead);
+        module_invoke_all('entity_delete', $lead, 'lead');
+        field_attach_delete('lead', $lead);
+      }
+      //Delete after calling hooks so that they can query node tables as needed.
+      db_delete('lead')
+        ->condition('lid', $lids, 'IN')
+        ->execute();
+      db_delete('lead_history')
+        ->condition('lid', $lids, 'IN')
+        ->execute();
+    }
+    catch (Exception $e) {
+      $transaction->rollback();
+      watchdog_exception('kolab_lead', $e);
+      throw $e;
+    }
+
+    // Clear the page and block and kolab_development_load_multiple caches.
+    entity_get_controller('lead')->resetCache();
+  }
+  //entity_delete_multiple('lead', $lids);
+}
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ */
+function kolab_lead_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+  // Add action link to 'lead/add' on 'admin/content/lead' page.
+  if ($root_path == 'admin/content/lead') {
+    $item = menu_get_item('lead/add');
+    if ($item['access']) {
+      $data['actions']['output'][] = array(
+        '#theme' => 'menu_local_action',
+        '#link' => $item,
+      );
+    }
+  }
+}
+
+/**
+ * kolab_lead_operations().
+ */
+function kolab_lead_operations() {
+  $operations = array(
+    'publish' => array(
+      'label' => t('Publish selected leads'),
+      'callback' => 'kolab_lead_mass_update',
+      'callback arguments' => array('updates' => array('published' => LEAD_PUBLISHED)),
+    ),
+    'unpublish' => array(
+      'label' => t('Unpublish selected leads'),
+      'callback' => 'kolab_lead_mass_update',
+      'callback arguments' => array('updates' => array('published' => LEAD_NOT_PUBLISHED)),
+    ),
+    'delete' => array(
+      'label' => t('Delete selected leads'),
+      'callback' => NULL,
+    ),
+  );
+  return $operations;
+}
+
+/**
+ * Determines the type of marker to be displayed for a given lead.
+ *
+ * @param $lid
+ *   Lead ID whose history supplies the "last viewed" timestamp.
+ * @param $timestamp
+ *   Time which is compared against lead's "last viewed" timestamp.
+ *
+ * @return
+ *   One of the MARK constants.
+ */
+function kolab_lead_mark($lid, $timestamp) {
+  global $user;
+  $cache = &drupal_static(__FUNCTION__, array());
+
+  if (!$user->uid) {
+    return MARK_READ;
+  }
+  if (!isset($cache[$lid])) {
+    $cache[$lid] = kolab_lead_last_viewed($lid);
+  }
+  if ($cache[$lid] == 0 && $timestamp > LEAD_NEW_LIMIT) {
+    return MARK_NEW;
+  }
+  elseif ($timestamp > $cache[$lid] && $timestamp > LEAD_NEW_LIMIT) {
+    return MARK_UPDATED;
+  }
+  return MARK_READ;
+}
+
+/**
+ * Retrieves the timestamp for the current user's last view of a specified lead.
+ *
+ * @param $lid
+ *   A lead ID.
+ *
+ * @return
+ *   If a lead has been previously viewed by the user, the timestamp in seconds
+ *   of when the last view occurred; otherwise, zero.
+ */
+function kolab_lead_last_viewed($lid) {
+  global $user;
+  $history = &drupal_static(__FUNCTION__, array());
+
+  if (!isset($history[$lid])) {
+    $history[$lid] = db_query("SELECT timestamp FROM {lead_history} WHERE uid = :uid AND lid = :lid", array(':uid' => $user->uid, ':lid' => $lid))->fetchObject();
+  }
+
+  return (isset($history[$lid]->timestamp) ? $history[$lid]->timestamp : 0);
+}
+
+/**
+ * Implements hook_cron().
+ */
+function kolab_lead_cron() {
+  db_delete('lead_history')
+    ->condition('timestamp', LEAD_NEW_LIMIT, '<')
+    ->execute();
+}
+
+/**
+ * Updates the 'last viewed' timestamp of the specified lead for current user.
+ *
+ * @param $lead
+ *   A lead object.
+ */
+function kolab_lead_tag_new($lead) {
+  global $user;
+  if ($user->uid) {
+    db_merge('lead_history')
+      ->key(array(
+        'uid' => $user->uid,
+        'lid' => $lead->lid,
+      ))
+      ->fields(array('timestamp' => REQUEST_TIME))
+      ->execute();
+   }
+}
+
+/**
+ * Implements hook_user_cancel().
+ */
+function kolab_lead_user_cancel($edit, $account, $method) {
+  if($method == 'user_cancel_reassign') db_delete('lead_history')->condition('uid', $account->uid)->execute();
+}
+
+/**
+ * Implements hook_user_delete().
+ */
+function kolab_lead_user_delete($account) {
+  db_delete('lead_history')->condition('uid', $account->uid)->execute();
+  db_update('lead')->fields(array('uid_ref' => 0))->condition('uid_ref', $account->uid)->execute();
+}
+
+/**
+ * Implements hook_user_update()
+ */
+function kolab_lead_user_update(&$edit, $account, $category) {
+  $user = entity_metadata_wrapper('user', $account);
+  $first_name = $user->field_first_name->value();
+  $surname = $user->field_last_name->value();
+
+  $fields = array('mail' => $account->mail);
+  if($first_name) $fields['first_name'] = $first_name;
+  if($surname) $fields['surname'] = $surname;
+
+  db_update('lead')->fields($fields)->condition('uid_ref', $account->uid)->execute();
+}
+
+/**
+ * Check if lead has account
+ */
+function kolab_lead_user_exists($uid) {
+  $result = db_select('lead', 'l')
+  ->fields('l', array('lid'))
+  ->condition('uid_ref', $uid)
+  ->range(0, 1)
+  ->execute()
+  ->rowCount();
+  return $result;
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function kolab_lead_block_info() {
+  $blocks['kolab_lead_recent'] = array(
+    'info' => t('Recent leads'),
+    'cache' => DRUPAL_CACHE_PER_ROLE // default
+  );
+  $blocks['kolab_lead_filter'] = array(
+    'info' => t('Filter leads'),
+    'cache' => DRUPAL_CACHE_PER_ROLE // default
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function kolab_lead_block_view($delta = '') {
+  $block = array();
+  switch ($delta) {
+    case 'kolab_lead_recent':
+      $block['subject'] = '';
+      $block['content'] = kolab_lead_render_recent();
+      break;
+    case 'kolab_lead_filter':
+      $block['subject'] = '';
+      $block['content'] = kolab_lead_render_filter();
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Leads filter 
+ */
+function kolab_lead_render_filter() {
+  return '<div id="leads-filter" class="filter"><span class="search"></span><input placeholder="Search all leads" class="form-text" type="search" /></div>';
+}
+
+/**
+ * Implements hook_block_configure().
+ */
+function kolab_lead_block_configure($delta = '') {
+  $form = array();
+  switch ($delta) {
+    case 'kolab_lead_recent':
+      $form['kolab_lead_block_recent'] = array(
+        '#type' => 'text_format',
+        '#title' => t('Text'),
+        '#format' => 'filtered_html',
+        '#default_value' => t(variable_get('kolab_lead_block_recent', '')),
+        '#required' => FALSE,
+      );
+      break;
+  }
+  return $form;
+}
+
+/**
+ * Implements hook_block_save().
+ */
+function kolab_lead_block_save($delta = '', $edit = array()) {
+  switch ($delta) {
+    case 'kolab_lead_recent':
+      variable_set('kolab_lead_block_recent', $edit['kolab_lead_block_recent']['value']);
+      break;
+  }
+}
+
+/**
+ * Render recent lead list table
+ */
+function kolab_lead_render_recent() {
+  drupal_add_js(drupal_get_path('module', 'kolab_lead') . '/js/kolab_lead_dt.js');
+
+  $action_links = array();
+  $action_links[] = l(t('View all leads'), 'leads', array('attributes' => array('class' => array('button-link'))));
+  $action_links[] = l(t('Add new lead'), 'lead/add', array('attributes' => array('class' => array('button-link'))));
+
+  $leads = kolab_lead_get_leads(TRUE, TRUE, 10);
+
+  $rows[] = array();
+
+  $destination = drupal_get_destination();
+
+  foreach ($leads as $lead_object) {
+    $lead = entity_metadata_wrapper('lead', $lead_object);
+    $lead_values = $lead->value();
+
+    $is_new = theme('mark', array('type' => kolab_lead_mark($lead->getIdentifier(), $lead->changed->value())));
+    $developments = array();
+    
+    if(isset($lead->field_developments) && count($lead->field_developments)) {
+      foreach ($lead->field_developments as $key => $development_collection) {
+        $development_object = $development_collection->field_dev->value();
+        //developments
+        if($development_object->did) $developments[$development_object->did] = l($development_object->title, 'development/' . $development_object->did);
+      }
+    }
+
+    $rows[] = array(
+      'full_name' => array('data' => l(entity_label('lead', $lead), 'lead/'. $lead->getIdentifier(). '/edit', array('query' => $destination)) . $is_new, 'class' => array('name', 'first')),
+      'email' => array('data' => $lead->mail->value()),
+      'development' => array('data' => (!empty($developments)) ? implode("<br />", $developments) : '-'),
+      //'created' => array('data' =>  format_date($lead->created->value(), 'site_full')),
+      'created' => array('data' =>  format_date($lead->created->value(), 'site'))
+    );
+  }
+
+  $header = array(
+    array('data' => t('Full name'), 'class' => array('first', 'name')),
+    array('data' => t('Email'), 'class' => array('email')),
+    array('data' => t('Development name'), 'class' => array('development')),
+    array('data' => t('Date created'), 'class' => array('created')),
+  );
+
+  $table['header'] = $header;
+  $table['attributes'] = array('class' => array('lead-recent-list', 'datatable'));
+  $table['caption'] = NULL;
+  $table['colgroups'] = array();
+  $table['sticky'] = "";
+  $table['empty'] = "No leads found.";
+  $table['rows'] = $rows;
+
+  return variable_get('kolab_lead_block_recent', '') . theme('item_list', array('items' => $action_links, 'attributes' => array('class' => array('action-links')))) . theme_table($table);
+}
+
+/**
+  * Lead list
+  *
+  * @param $roles An array Names of the roles we're wanting users to have
+  * @param $published_only boolean Only return published leads?
+  * @param $limit Limit search result (0 - no limit)
+  *
+  * @return array An array of lead objects
+  */
+function kolab_lead_get_leads($published_only = TRUE, $newest = TRUE, $limit = 0, $did = 0, $is_investor = FALSE) {
+  $lids = array();
+  $leads = array();
+
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'lead');
+  if($published_only) {
+    $query->propertyCondition('published', 1);
+  }
+
+  if($did) {
+    $inner = new EntityFieldQuery();
+    $inner_r = $inner->entityCondition('entity_type', 'field_collection_item')->fieldCondition('field_dev', 'target_id', $did)->execute();
+    if(!empty($inner_r['field_collection_item'])) {
+      $keys = array_keys($inner_r['field_collection_item']);
+      $query->fieldCondition('field_developments', 'value', $keys);
+    }
+    //$query->fieldCondition('field_development', 'target_id', $did);
+  }
+
+  if($is_investor) {
+    $query->propertyCondition('investor', '', '<>');
+  }
+
+  if($limit) {
+    $query->range(0, $limit);
+  }
+
+  if($newest) {
+    //$query->propertyOrderBy('created', 'DESC');
+    $query->propertyOrderBy('lid', 'DESC');
+  }
+
+  $entities = $query->execute();
+  if (!empty($entities)) {
+    $leads = entity_load('lead', array_keys($entities['lead']));
+  }
+
+  return $leads;
+}
+
+/**
+ * Check if lead with submission ID already exists.
+ */
+function kolab_lead_submission_exists($sid) {
+  $result = db_select('lead', 'l')
+  ->fields('l', array('lid'))
+  ->condition('public_id', 'sub_' . $sid)
+  ->range(0, 1)
+  ->execute()
+  ->rowCount();
+  return $result;
+}
+
+/**
+ * Check if lead with e-mail already exists.
+ */
+function kolab_lead_submission_unique_mail($mail, $lid = 0) {
+  $query = db_select('lead', 'l')->fields('l', array('lid'))->condition('mail', $mail);
+  if($lid) $query->condition('lid', $lid, '<>');
+  $result = $query->range(0, 1)->execute()->rowCount();
+  return !$result;
+}
+
+/**
+ * Implements hook_views_api().
+ */
+/*function kolab_lead_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'kolab_lead'),
+  );
+}*/
+
+function kolab_lead_validate($name, $args = array()) {
+  return call_user_func_array('kolab_lead_validate_' . $name, $args);
+}
+
+function kolab_lead_validate_mail($mail) {
+  return (bool) filter_var($mail, FILTER_VALIDATE_EMAIL);
+}
+
+function kolab_lead_validate_mail_unique($mail, $lid = 0) {
+  return kolab_lead_submission_unique_mail($mail, $lid);
+}
+
+function kolab_lead_validate_status($status) {
+  $statuses = kolab_lead_get_statuses();
+  if(!is_numeric($status) || !isset($statuses[$status])) return false;
+  else return true;
+}
+
+function kolab_lead_validate_source($source) {
+  $sources = kolab_lead_get_sources();
+  if(!is_string($source) || !isset($sources[$source])) return false;
+  return true;
+}
+
+function kolab_lead_validate_title($title) {
+  if(strlen($title) > 32) return false;
+  $titles = kolab_lead_get_titles();
+  if(!array_key_exists($title, $titles)) return false;
+  return true;
+}
+
+function kolab_lead_validate_first_name($first_name) {
+  if(strlen($first_name) > 255) return false;
+  return true;
+}
+
+function kolab_lead_validate_surname($surname) {
+  if(strlen($surname) > 255) return false;
+  return true;
+}
+
+function kolab_lead_validate_investor($value) {
+  $investor_statuses = kolab_lead_get_investor_statuses();
+  if(!isset($investor_statuses[$value])) return false;
+  else return true;
+  // if(!in_array($value, array(0,1))) return false;
+  // return true;
+}
+
+function kolab_lead_validate_phone($phone) {
+  if(strlen($phone) > 20) return false;
+  return true;
+}
+
+function kolab_lead_validate_address($address) {
+  if(strlen($address) > 255) return false;
+  return true;
+}
+
+function kolab_lead_validate_county($county) {
+  if(strlen($county) > 255) return false;
+  return true;
+}
+
+function kolab_lead_validate_postcode($postcode) {
+  if(strlen($postcode) > 64) return false;
+  return true;
+}
+
+function kolab_lead_validate_development_exists($did) {
+  if(!$did) return true;
+  if(module_exists('kolab_development')) {
+    return kolab_development_record_exists($did);
+  }
+  return false;
+}
+
+function kolab_lead_get_user_details($uid) {
+  $data = &drupal_static(__FUNCTION__);
+  if (!isset($data)) {
+    $data = NULL;
+    if ($cache = cache_get('kolab_lead_user_data_' . $uid)) {
+      $data = $cache->data;
+    }
+    else {
+      $result = db_select('lead', 'l')->fields('l', array('lid'))->condition('l.uid_ref', $uid)->execute();
+      if($item = $result->fetchObject()) {
+        $lead = kolab_lead_load($item->lid);
+        $lead_wrapper = entity_metadata_wrapper('lead', $lead);
+        $data['lid'] = $lead_wrapper->getIdentifier();
+        $data['mail'] = $lead_wrapper->mail->value();
+        $data['first_name'] = $lead_wrapper->first_name->value();
+        $data['surname'] = $lead_wrapper->surname->value();
+        $data['title'] = $lead_wrapper->title->value();
+        $data['address'] = $lead_wrapper->address->value();
+        $data['address2'] = $lead_wrapper->address2->value();
+        $data['county'] = $lead_wrapper->county->value();
+        $data['postcode'] = $lead_wrapper->postcode->value();
+        $data['phone'] = $lead_wrapper->phone->value();
+        $data['phone_mobile'] = $lead_wrapper->phone_mobile->value();
+      }
+      cache_set('kolab_lead_user_data_' . $uid, $data, 'cache');
+    }
+  }
+  return $data;
+}
+
+function kolab_lead_get_user_ID($uid) {
+  $result = db_select('lead', 'l')->fields('l', array('lid'))->condition('l.uid_ref', $uid)->execute();
+  if($item = $result->fetchObject()) {
+    if($lid = $item->lid) return $lid;
+  }
+}
+
+/**
+ * Implements hook_lead_update()
+ */
+// function kolab_lead_lead_update($lead) {
+// }
+
+/**
+ * Implements hook_lead_update()
+ */
+// function kolab_lead_lead_insert($lead) {
+// }
+
